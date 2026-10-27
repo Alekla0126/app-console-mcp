@@ -1,0 +1,115 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "app-console",
+  "description": "Google Play Console, App Store Connect and AdMob for Claude Code: MCP servers, skills and a CLI. No browser needed.",
+  "owner": {
+    "name": "Alejandro Lagunes",
+    "url": "https://github.com/Alekla0126"
+  },
+  "plugins": [
+    {
+      "name": "google-play",
+      "displayName": "Google Play Console",
+      "source": "./",
+      "description": "Listings, .aab upload, tracks, promote, staged rollouts, reviews and replies, Android vitals, products and search rank.",
+      "version": "0.1.0",
+      "author": { "name": "Alejandro Lagunes", "url": "https://github.com/Alekla0126" },
+      "homepage": "https://github.com/Alekla0126/app-console-mcp",
+      "repository": "https://github.com/Alekla0126/app-console-mcp",
+      "license": "MIT",
+      "keywords": ["google-play", "play-console", "android", "release", "aso", "mcp"],
+      "category": "mobile",
+      "skills": ["./skills/google-play"],
+      "mcpServers": {
+        "google-play": {
+          "command": "uvx",
+          "args": ["--quiet", "--from", "${CLAUDE_PLUGIN_ROOT}", "appconsole", "mcp", "play"],
+          "env": { "GOOGLE_PLAY_SERVICE_ACCOUNT": "${user_config.service_account_file}" }
+        }
+      },
+      "userConfig": {
+        "service_account_file": {
+          "type": "file",
+          "title": "Service account JSON key",
+          "description": "Google Cloud service account key that was invited in Play Console > Users and permissions. Leave empty to use `appconsole config` instead."
+        }
+      }
+    },
+    {
+      "name": "app-store-connect",
+      "displayName": "App Store Connect",
+      "source": "./",
+      "description": "Versions and review state, listing texts, create version, submit to App Review, release, builds, reviews and responses, sales and search rank.",
+      "version": "0.1.0",
+      "author": { "name": "Alejandro Lagunes", "url": "https://github.com/Alekla0126" },
+      "homepage": "https://github.com/Alekla0126/app-console-mcp",
+      "repository": "https://github.com/Alekla0126/app-console-mcp",
+      "license": "MIT",
+      "keywords": ["app-store-connect", "ios", "testflight", "app-review", "aso", "mcp"],
+      "category": "mobile",
+      "skills": ["./skills/app-store-connect"],
+      "mcpServers": {
+        "app-store-connect": {
+          "command": "uvx",
+          "args": ["--quiet", "--from", "${CLAUDE_PLUGIN_ROOT}", "appconsole", "mcp", "appstore"],
+          "env": {
+            "ASC_KEY_ID": "${user_config.key_id}",
+            "ASC_ISSUER_ID": "${user_config.issuer_id}",
+            "ASC_PRIVATE_KEY_PATH": "${user_config.private_key_file}",
+            "ASC_VENDOR_NUMBER": "${user_config.vendor_number}"
+          }
+        }
+      },
+      "userConfig": {
+        "key_id": {
+          "type": "string",
+          "title": "API key ID",
+          "description": "Key ID from App Store Connect > Users and Access > Integrations > App Store Connect API."
+        },
+        "issuer_id": {
+          "type": "string",
+          "title": "Issuer ID",
+          "description": "Issuer ID shown above the list of team keys."
+        },
+        "private_key_file": {
+          "type": "file",
+          "title": "Private key (.p8)",
+          "description": "The AuthKey_<KEY_ID>.p8 file. Leave empty if it is in ~/.appstoreconnect/private_keys."
+        },
+        "vendor_number": {
+          "type": "string",
+          "title": "Vendor number (optional)",
+          "description": "Only for sales reports: App Store Connect > Payments and Financial Reports."
+        }
+      }
+    },
+    {
+      "name": "admob",
+      "displayName": "AdMob",
+      "source": "./",
+      "description": "Earnings, eCPM, match and show rate by app, ad unit, country, format, date or ad source, and the list of apps and ad unit ids.",
+      "version": "0.1.0",
+      "author": { "name": "Alejandro Lagunes", "url": "https://github.com/Alekla0126" },
+      "homepage": "https://github.com/Alekla0126/app-console-mcp",
+      "repository": "https://github.com/Alekla0126/app-console-mcp",
+      "license": "MIT",
+      "keywords": ["admob", "ads", "ecpm", "monetization", "mcp"],
+      "category": "mobile",
+      "skills": ["./skills/admob"],
+      "mcpServers": {
+        "admob": {
+          "command": "uvx",
+          "args": ["--quiet", "--from", "${CLAUDE_PLUGIN_ROOT}", "appconsole", "mcp", "admob"],
+          "env": { "ADMOB_PUBLISHER_ID": "${user_config.publisher_id}" }
+        }
+      },
+      "userConfig": {
+        "publisher_id": {
+          "type": "string",
+          "title": "Publisher ID (optional)",
+          "description": "pub-XXXXXXXXXXXXXXXX, only needed if your Google user has several AdMob accounts. Authorize once with `appconsole admob login`."
+        }
+      }
+    }
+  ]
+}

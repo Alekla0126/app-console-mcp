@@ -1,0 +1,9 @@
+#!/bin/sh
+# The appconsole CLI from this copy of the repo. uv builds and caches it on first use.
+# When the Claude Code plugin is enabled this directory is on the Bash tool's PATH.
+if ! command -v uvx >/dev/null 2>&1; then
+  echo "appconsole needs uv: https://docs.astral.sh/uv/getting-started/installation/" >&2
+  exit 127
+fi
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+exec uvx --quiet --from "$ROOT" appconsole "$@"
