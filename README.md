@@ -38,14 +38,16 @@ AdMob 2026-10-20 to 2026-10-26 by format: 128.40 USD (+9% vs previous 7 d: 117.8
 |---|---|---|
 | `apps` list apps the key can see | `apps` list apps | `accounts` publisher accounts |
 | `listing` / `update-listing` title, short, full description, new languages | `listing` / `update-listing` name, subtitle, keywords, description, promo text, what's new | `apps` apps and ad unit ids |
-| `tracks` releases per track | `versions` versions and review state | `report` earnings, eCPM, match/show rate by app, ad unit, country, format, platform, date, month or ad source, vs. previous period |
-| `upload` .aab/.apk to any track (staged or draft) | `create-version` new editable version | |
-| `promote` between tracks | `builds` processing state, export compliance | |
-| `rollout` change %, complete, halt, resume | `submit` attach build + submit to App Review | |
-| `reviews` / `reply` | `release` release an approved manual-release version | |
-| `vitals` crash and ANR rates (Google's 28-day numbers) | `reviews` / `reply` | |
-| `products` subscriptions, base plans, prices | `sales` downloads, IAP units, proceeds per app | |
+| `tracks` releases per track | `versions` versions and review state | `report` earnings, eCPM, match/show rate, CTR by app, ad unit, country, format, app/SDK/OS version, why ads are limited, ad source or mediation group, vs. previous period |
+| `upload` .aab/.apk to any track (staged or draft) | `create-version` new editable version | `campaign-report` promotion campaigns: installs, cost, CPI |
+| `promote` between tracks | `builds` processing state, export compliance | `ad-sources` networks and their adapters' settings |
+| `rollout` change %, complete, halt, resume | `submit` attach build + submit to App Review | `mediation-groups` / `ad-unit-mappings` ✱ |
+| `reviews` / `reply` | `release` release an approved manual-release version | `create-app` / `create-ad-unit` ✱ |
+| `vitals` crash and ANR rates (Google's 28-day numbers) | `reviews` / `reply` | `map-ad-unit` / `create-mediation-group` / `update-mediation-group` ✱ |
+| `products` subscriptions, base plans, prices | `sales` downloads, IAP units, proceeds per app | `ab-experiment` start or stop a mediation A/B test ✱ |
 | `search-rank` public search position | `search-rank` public search position | |
+
+✱ AdMob's limited access: Google has to enable your publisher id for these methods (ask your AdMob account manager or AdMob support) and the token needs the `admob.monetization` scope (`appconsole admob login --monetization`). Until then they explain what to ask for.
 
 **Safe by default.** Every tool that changes something is a dry run unless you pass `confirm=true`
 (`--confirm` in the CLI). Google Play dry runs build the change in a draft edit and let Google validate it
@@ -147,7 +149,8 @@ AdMob does not accept service accounts, only a Google user, so you authorize onc
    an "unverified app" warning; that is expected.
 3. Create an OAuth client ID of type **Desktop app** and download its JSON.
 4. `appconsole admob login --client-secrets client_secret.json` (opens the browser once; the token is saved in
-   `~/.config/appconsole/admob-token.json`).
+   `~/.config/appconsole/admob-token.json`). Add `--monetization` to also create apps, ad units and mediation
+   groups, once Google enabled your publisher id for them.
 
 Alternative: gcloud application-default credentials with the AdMob scopes —
 `gcloud auth application-default login --scopes=https://www.googleapis.com/auth/admob.readonly,https://www.googleapis.com/auth/admob.report,https://www.googleapis.com/auth/cloud-platform`.
@@ -174,7 +177,7 @@ These still need the website, and the tools say so when you hit them:
   experiments, replying to reviews older than about a week.
 - **App Store Connect**: creating the app record, App Privacy labels, age rating, pricing and in-app purchase
   setup, Resolution Center messages. Screenshots are possible through the API but not implemented yet.
-- **AdMob**: creating ad units and mediation groups (closed beta API), privacy & messaging, app-ads.txt, payments.
+- **AdMob**: privacy & messaging (GDPR, US states, IDFA), blocking controls, the policy center, payments, app-ads.txt status and users. Creating apps, ad units, mappings and mediation groups exists but only for publishers Google enabled (✱ above).
 
 ## Development
 

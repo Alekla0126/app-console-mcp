@@ -24,8 +24,10 @@ Codex: ahí cada agente recibe estas herramientas para los servicios que hayas c
 - **App Store Connect**: versiones y estado de revisión, textos de la ficha (nombre, subtítulo, keywords,
   descripción, texto promocional, novedades), crear versión, builds, adjuntar build y enviar a App Review, publicar
   una versión aprobada, reseñas y respuestas, ventas (descargas, compras, ingresos) y posición en la búsqueda.
-- **AdMob**: ganancias, eCPM, tasa de coincidencia y de visualización por app, bloque, país, formato, plataforma,
-  fecha, mes o fuente de anuncios, comparadas con el periodo anterior; y la lista de apps y bloques.
+- **AdMob**: ganancias, eCPM, tasa de coincidencia, de visualización y CTR por app, bloque, país, formato,
+  versión de la app o del SDK, motivo de anuncios limitados, fuente de anuncios o grupo de mediación, comparadas con
+  el periodo anterior; reporte de campañas (instalaciones, costo, CPI); apps, bloques, fuentes y adaptadores. Con el
+  acceso limitado de Google: crear apps y bloques, mapeos, grupos de mediación y pruebas A/B.
 
 **Seguro por defecto**: todo lo que cambia algo es un ensayo si no pasas `confirm=true` (`--confirm` en la CLI).
 En Google Play el ensayo arma el cambio en un borrador y Google lo valida antes de descartarlo.
@@ -56,7 +58,8 @@ Para otros clientes MCP y todos los detalles, mira el [README en inglés](README
   `ASC_PRIVATE_KEY_PATH` (o `ASC_API_KEY_JSON` si ya usas fastlane). Para ventas, `ASC_VENDOR_NUMBER`.
 - **AdMob**: no acepta cuentas de servicio. Crea un cliente OAuth tipo *App de escritorio* (pantalla de
   consentimiento en *Producción* para que el token no caduque a los 7 días) y corre una sola vez
-  `appconsole admob login --client-secrets client_secret.json`.
+  `appconsole admob login --client-secrets client_secret.json` (con `--monetization` para crear y cambiar cosas,
+  cuando Google habilite tu cuenta para esa parte de la API).
 
 `appconsole doctor` revisa los tres servicios.
 

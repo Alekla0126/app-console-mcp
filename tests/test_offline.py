@@ -82,6 +82,9 @@ def test_cli_types_flags_and_lists():
         "com.x", "app.aab", 10.0, True, True, "internal")
     a = cli.build_parser().parse_args(["play", "search-rank", "com.x", "pdf scanner", "doc scan"])
     assert a.keywords == ["pdf scanner", "doc scan"]
+    # a flag that defaults to true is turned off with --no-…
+    assert cli.build_parser().parse_args(["admob", "apps"]).ad_units is True
+    assert cli.build_parser().parse_args(["admob", "apps", "--no-ad-units"]).ad_units is False
 
 
 def test_cli_prints_errors_without_traceback(capsys, monkeypatch):
@@ -212,3 +215,104 @@ def test_all_in_one_server_has_every_tool_once():
     names = [fn.__name__ for fn in cli.all_tools().tools]
     assert len(names) == len(set(names)) == sum(len(t.tools) for t in cli.TOOLSETS.values())
     assert cli.build_parser().parse_args(["mcp", "all"]).service == "all"
+
+
+# ---------------------------------------------------------------- AdMob: the rest of the API
+
+@pytest.fixture
+def admob_offline(monkeypatch):
+    """An AdMob account with two apps and two ad sources, without the network."""
+    monkeypatch.setattr(admob, "_account", lambda: "accounts/pub-1")
+    monkeypatch.setattr(admob, "_currency", lambda: "USD")
+    monkeypatch.setattr(admob, "_source_names", lambda: {admob.ADMOB_NETWORK: "AdMob Network", "777": "Meta"})
+    monkeypatch.setattr(admob, "_list", lambda resource, *a, **k: {
+        "apps": [{"appId": "ca-app-pub-1~10", "platform": "ANDROID", "linkedAppInfo": {"appStoreId": "com.x"}}],
+    }.get(resource, []))
+
+
+def test_admob_limited_access_errors_say_what_to_do(admob_offline):
+    def scope():
+        raise core.ConsoleError("HTTP 403 on GET /x: Request had insufficient authentication scopes.")
+
+    def denied():
+        raise core.ConsoleError("HTTP 403 on GET /x: The caller does not have permission")
+    with pytest.raises(core.ConsoleError, match="login --monetization"):
+        admob._limited(scope)
+    with pytest.raises(core.ConsoleError, match="limited access, and pub-1 is not enabled"):
+        admob._limited(denied)
+
+
+def test_admob_mediation_lines_find_their_mappings(admob_offline, monkeypatch):
+    monkeypatch.setattr(admob, "_adapters", lambda source: [{"adapterId": "71"}])
+    monkeypatch.setattr(admob, "_mappings",
+                        lambda unit: [{"adapterId": "71", "name": f"accounts/pub-1/adUnits/{unit[-1]}/adUnitMappings/9"}])
+    lines = admob._parse_lines(f"{admob.ADMOB_NETWORK}@live, 777@1.5", ["ca-app-pub-1/1"])
+    assert lines["-1"] == {"id": "-1", "displayName": "AdMob Network", "adSourceId": admob.ADMOB_NETWORK,
+                           "state": "ENABLED", "cpmMode": "LIVE"}
+    assert lines["-2"]["cpmMode"] == "MANUAL" and lines["-2"]["cpmMicros"] == "1500000"
+    assert lines["-2"]["adUnitMappings"] == {"ca-app-pub-1/1": "accounts/pub-1/adUnits/1/adUnitMappings/9"}
+    monkeypatch.setattr(admob, "_mappings", lambda unit: [])
+    with pytest.raises(core.ConsoleError, match="admob_map_ad_unit"):
+        admob._parse_lines("777@live", ["ca-app-pub-1/1"])
+    with pytest.raises(core.ConsoleError, match="at least 0.01"):
+        admob._parse_lines(f"{admob.ADMOB_NETWORK}@0.001", [])
+    with pytest.raises(core.ConsoleError, match="Unknown ad source"):
+        admob._parse_lines("123@live", [])
+
+
+def test_admob_writes_are_dry_runs_and_check_the_scope(admob_offline, monkeypatch):
+    out = admob.admob_create_ad_unit("ca-app-pub-1~10", "Coins", "rewarded", reward_amount=5, reward_item="coins")
+    assert out.startswith("DRY RUN") and '"rewardSettings": {"unitAmount": "5", "unitType": "coins"}' in out
+    assert '"adTypes": ["RICH_MEDIA", "VIDEO"]' in out
+    assert '"adTypes": ["RICH_MEDIA"]' in admob.admob_create_ad_unit("ca-app-pub-1~10", "Top", "BANNER")
+    with pytest.raises(core.ConsoleError, match="already in AdMob"):
+        admob.admob_create_app("android", app_store_id="com.x")
+    with pytest.raises(core.ConsoleError, match="No app"):
+        admob.admob_create_ad_unit("ca-app-pub-1~99", "x", "BANNER")
+    # confirm with a saved token that lacks admob.monetization: stopped before calling Google
+    session = type("S", (), {"granted_scopes": set(admob.SCOPES)})()
+    monkeypatch.setattr(admob, "_session", lambda: session)
+    monkeypatch.setattr(admob, "_beta", lambda *a, **k: pytest.fail("must not call Google"))
+    with pytest.raises(core.ConsoleError, match="without admob.monetization"):
+        admob.admob_create_app("IOS", display_name="New", confirm=True)
+
+
+def test_admob_update_group_sends_only_what_changes(admob_offline, monkeypatch):
+    group = {"mediationGroupId": "5", "displayName": "Banners", "state": "DISABLED",
+             "mediationGroupLines": {"11": {"adSourceId": "777", "cpmMode": "LIVE", "state": "ENABLED"}}}
+    monkeypatch.setattr(admob, "_group", lambda gid: group)
+    out = admob.admob_update_mediation_group("5", state="enabled", line_id="11", line_cpm=2)
+    assert out.startswith("DRY RUN") and "state DISABLED → ENABLED" in out and "cpm=2" in out
+    sent = {}
+    monkeypatch.setattr(admob, "_require_monetization", lambda: None)
+    monkeypatch.setattr(admob, "_beta", lambda method, path, **kw: sent.update(method=method, path=path, **kw))
+    admob.admob_update_mediation_group("5", state="ENABLED", confirm=True)
+    assert sent == {"method": "PATCH", "path": "mediationGroups/5", "params": {"updateMask": "state"},
+                    "json": {"state": "ENABLED"}}
+    with pytest.raises(core.ConsoleError, match="no line 99"):
+        admob.admob_update_mediation_group("5", line_id="99", line_state="DISABLED")
+
+
+def test_admob_mediation_groupings_switch_reports(admob_offline, monkeypatch):
+    seen = []
+    monkeypatch.setattr(admob, "run_report", lambda s, e, dims, mediation, *a, **k: (seen.append(mediation), ([], "USD"))[1])
+    admob.admob_report(by="mediation_group")
+    admob.admob_report(by="app_version,serving_restriction")
+    assert seen[0] is True and seen[3] is False
+    with pytest.raises(core.ConsoleError, match="ad_type isn't in the mediation report"):
+        admob.admob_report(by="ad_type,ad_source")
+
+
+def test_admob_campaign_report(admob_offline, monkeypatch):
+    def row(name, impr, clicks, installs, cost):
+        return {"dimensionValues": {"CAMPAIGN_NAME": {"value": name}}, "metricValues": {
+            "IMPRESSIONS": {"integerValue": str(impr)}, "CLICKS": {"integerValue": str(clicks)},
+            "INSTALLS": {"integerValue": str(installs)}, "ESTIMATED_COST": {"microsValue": str(int(cost * 1e6))}}}
+    monkeypatch.setattr(admob, "_session", lambda: None)
+    rows = [row("Small", 100, 1, 0, 0.5), row("Big", 1000, 50, 10, 20)]
+    monkeypatch.setattr(admob, "call", lambda *a, **k: {"rows": rows})
+    out = admob.admob_campaign_report(days=7, end_date="2026-01-10")
+    assert "1100 impr, 51 clicks, 10 installs, cost 20.50 USD, CPI 2.05" in out
+    assert out.splitlines()[1].startswith("  Big: 1000 impr, 50 clicks (CTR 5.0%), 10 installs, cost 20.00 USD, CPI 2.00")
+    with pytest.raises(core.ConsoleError, match="at most 30 days"):
+        admob.admob_campaign_report(days=31)

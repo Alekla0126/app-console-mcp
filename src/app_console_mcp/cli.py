@@ -56,6 +56,8 @@ def _add_command(sub, fn, prefix: str) -> None:
         h = helps.get(pname, "")
         if param.default is inspect.Parameter.empty:
             p.add_argument(pname, type=base, nargs="+" if is_list else None, help=h)
+        elif t is bool and param.default:
+            p.add_argument("--no-" + pname.replace("_", "-"), dest=pname, action="store_false", help=f"don't: {h}")
         elif t is bool:
             p.add_argument("--" + pname.replace("_", "-"), dest=pname, action="store_true", help=h)
         else:
@@ -79,7 +81,10 @@ def build_parser() -> argparse.ArgumentParser:
             login = cmds.add_parser("login", help="Authorize AdMob once with your own OAuth desktop client")
             login.add_argument("--client-secrets", required=True, help="OAuth client JSON (type: Desktop app)")
             login.add_argument("--no-browser", action="store_true", help="Print the URL instead of opening it")
-            login.set_defaults(_fn=lambda client_secrets, no_browser: admob.login(client_secrets, no_browser))
+            login.add_argument("--monetization", action="store_true",
+                               help="Also grant admob.monetization, needed to create apps, ad units and mediation")
+            login.set_defaults(_fn=lambda client_secrets, no_browser, monetization:
+                               admob.login(client_secrets, no_browser, monetization))
 
     m = groups.add_parser("mcp", help="Run an MCP server on stdio")
     m.add_argument("service", choices=[*TOOLSETS, "all"], help="one service, or all three in one server")
