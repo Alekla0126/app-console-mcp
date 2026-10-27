@@ -12,7 +12,9 @@ Cada herramienta existe dos veces, con la misma salida:
 - como **comando** (`appconsole ...`) para ti, tus scripts y tu CI.
 
 Se instala como tres plugins de Claude Code (Google Play, App Store Connect y AdMob), cada uno con su servidor
-MCP y una skill que le enseña a Claude los flujos seguros.
+MCP y una skill que le enseña a Claude los flujos seguros. También viene integrado en
+[Alchemist Coder](https://github.com/Alekla0126/alchemist-coder), la app de escritorio open source para Claude Code y
+Codex: ahí cada agente recibe estas herramientas para los servicios que hayas configurado.
 
 ## Qué hace
 

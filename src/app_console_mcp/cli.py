@@ -15,9 +15,17 @@ import sys
 import typing
 
 from . import __version__, admob, appstore, play
-from .core import CONFIG_FILE, ConsoleError, load_config, save_config
+from .core import CONFIG_FILE, ConsoleError, Toolset, load_config, save_config
 
 TOOLSETS = {t.key: t for t in (play.toolset, appstore.toolset, admob.toolset)}
+
+
+def all_tools() -> Toolset:
+    """The three services as one server, for clients that install a single MCP server."""
+    ts = Toolset("all", "app-console", "Google Play, App Store Connect and AdMob",
+                 " ".join(t.instructions for t in TOOLSETS.values()))
+    ts.tools = [fn for t in TOOLSETS.values() for fn in t.tools]
+    return ts
 
 
 def parse_doc(doc: str) -> tuple[str, str, dict[str, str]]:
@@ -74,7 +82,7 @@ def build_parser() -> argparse.ArgumentParser:
             login.set_defaults(_fn=lambda client_secrets, no_browser: admob.login(client_secrets, no_browser))
 
     m = groups.add_parser("mcp", help="Run an MCP server on stdio")
-    m.add_argument("service", choices=list(TOOLSETS))
+    m.add_argument("service", choices=[*TOOLSETS, "all"], help="one service, or all three in one server")
 
     c = groups.add_parser("config", help=f"Read or change {CONFIG_FILE}")
     c.add_argument("action", choices=["show", "set", "unset"])
@@ -119,7 +127,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.group == "mcp":
             from .server import serve
-            serve(TOOLSETS[args.service])
+            serve(all_tools() if args.service == "all" else TOOLSETS[args.service])
             return 0
         if args.group == "config":
             print(_config(args.action, args.key, args.value))

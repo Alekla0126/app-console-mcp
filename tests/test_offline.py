@@ -205,3 +205,9 @@ def test_admob_report_formatting(monkeypatch):
 def test_admob_label_formats_dates():
     row = {"dimensionValues": {"DATE": {"value": "20260105"}}}
     assert admob._label(row, ["DATE"]) == "2026-01-05"
+
+
+def test_all_in_one_server_has_every_tool_once():
+    names = [fn.__name__ for fn in cli.all_tools().tools]
+    assert len(names) == len(set(names)) == sum(len(t.tools) for t in cli.TOOLSETS.values())
+    assert cli.build_parser().parse_args(["mcp", "all"]).service == "all"

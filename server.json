@@ -1,0 +1,69 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.Alekla0126/app-console-mcp",
+  "title": "App Console: Google Play, App Store Connect, AdMob",
+  "description": "Google Play Console, App Store Connect and AdMob via official APIs: releases, reviews, vitals, ads",
+  "repository": {
+    "url": "https://github.com/Alekla0126/app-console-mcp",
+    "source": "github"
+  },
+  "version": "0.1.1",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "app-console-mcp",
+      "version": "0.1.1",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp"
+        },
+        {
+          "type": "positional",
+          "value": "all"
+        }
+      ],
+      "environmentVariables": [
+        {
+          "name": "GOOGLE_PLAY_SERVICE_ACCOUNT",
+          "description": "Path to a Google Cloud service account JSON key invited in Play Console",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "ASC_KEY_ID",
+          "description": "App Store Connect API key ID",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "ASC_ISSUER_ID",
+          "description": "App Store Connect API issuer ID",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "ASC_PRIVATE_KEY_PATH",
+          "description": "Path to the AuthKey_<KEY_ID>.p8 file",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "ASC_VENDOR_NUMBER",
+          "description": "Vendor number, only for sales reports",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "ADMOB_PUBLISHER_ID",
+          "description": "pub-... id, only with several AdMob accounts",
+          "isRequired": false,
+          "isSecret": false
+        }
+      ]
+    }
+  ]
+}

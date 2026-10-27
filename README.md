@@ -12,7 +12,11 @@ text. Every tool exists twice, with identical output:
 - as a **CLI command** (`appconsole ...`) for you, your scripts and CI.
 
 It ships as three Claude Code plugins (Google Play, App Store Connect, AdMob), each with its MCP server and a
-skill that teaches Claude the safe workflows.
+skill that teaches Claude the safe workflows. It also comes built into
+[Alchemist Coder](https://github.com/Alekla0126/alchemist-coder), the open-source desktop app for Claude Code and
+Codex: every agent there gets these tools for the services you have set up.
+
+<!-- mcp-name: io.github.Alekla0126/app-console-mcp -->
 
 ```text
 $ appconsole play vitals com.example.app
@@ -86,6 +90,8 @@ Bash tool.
   }
 }
 ```
+
+`appconsole mcp all` serves the three services as a single server, for clients that take only one.
 
 Or with the Claude Code CLI:
 `claude mcp add google-play -- uvx --from git+https://github.com/Alekla0126/app-console-mcp appconsole mcp play`
@@ -181,6 +187,11 @@ claude plugin validate .
 `bin/appconsole` and the plugins run the package with `uvx --from <repo>`, which caches the build; after editing
 the sources use the `.venv` or add `--refresh-package app-console-mcp`. For a release, bump the version in
 `pyproject.toml`, `src/app_console_mcp/__init__.py` and the three entries of `.claude-plugin/marketplace.json`.
+
+Tagging `v*` runs `.github/workflows/publish.yml`, which publishes to PyPI and then to the official MCP Registry
+(`server.json`). It is off until PyPI trusts the workflow: on pypi.org add a pending trusted publisher (project
+`app-console-mcp`, owner `Alekla0126`, repository `app-console-mcp`, workflow `publish.yml`, environment `pypi`), then
+`gh variable set PUBLISH_PYPI --body true` and re-run the workflow.
 
 A tool is one function decorated with `@tool()` (or `@tool(write=True)` with a `confirm` argument) in
 `src/app_console_mcp/{play,appstore,admob}.py`. Its signature and Google-style docstring become both the MCP
