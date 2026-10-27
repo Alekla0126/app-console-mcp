@@ -1,5 +1,6 @@
 """Offline tests: no network and no credentials needed."""
 import asyncio
+import inspect
 from datetime import date
 
 import pytest
@@ -70,7 +71,7 @@ def test_every_tool_has_a_cli_command():
         for fn in ts.tools:
             name = fn.__name__.removeprefix(key + "_").replace("_", "-")
             args = [key, name] + ["x"] * sum(
-                1 for p in __import__("inspect").signature(fn).parameters.values() if p.default is p.empty)
+                1 for p in inspect.signature(fn).parameters.values() if p.default is p.empty)
             assert parser.parse_args(args)._fn is fn
 
 
@@ -92,7 +93,7 @@ def test_cli_prints_errors_without_traceback(capsys, monkeypatch):
 
 
 def test_parse_doc():
-    summary, body, helps = cli.parse_doc(play.play_upload.__doc__.replace("\n    ", "\n"))
+    summary, body, helps = cli.parse_doc(inspect.getdoc(play.play_upload))  # as the CLI reads it
     assert summary.startswith("Upload an .aab")
     assert "Args:" not in body
     assert helps["track"].startswith("internal, alpha")
