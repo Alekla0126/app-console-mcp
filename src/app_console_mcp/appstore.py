@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import csv
 import gzip
+import hashlib
 import io
 import json
 import time
@@ -486,6 +487,152 @@ def appstore_release(app: str, platform: str = "IOS", confirm: bool = False) -> 
         "type": "appStoreVersionReleaseRequests",
         "relationships": {"appStoreVersion": {"data": {"type": "appStoreVersions", "id": v["id"]}}}}})
     return f"Release requested: {plan}."
+
+
+# ---------------------------------------------------------------- screenshots
+
+SCREENSHOT_MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
+MAX_SCREENSHOTS = 10
+
+
+def _localization(app_id: str, platform: str, locale: str, which: str) -> tuple[dict, dict]:
+    v = _pick_version(app_id, platform, which)
+    loc = _by_locale(_all(f"/v1/appStoreVersions/{v['id']}/appStoreVersionLocalizations")[0]).get(locale)
+    if not loc:
+        raise ConsoleError(f"Version {v['attributes']['versionString']} has no {locale} localization: add it with "
+                           "appstore_update_listing first.")
+    return v, loc
+
+
+def _screenshot_sets(loc_id: str) -> list[dict]:
+    sets, included = _all(f"/v1/appStoreVersionLocalizations/{loc_id}/appScreenshotSets",
+                          {"include": "appScreenshots", "fields[appScreenshots]": "fileName,assetDeliveryState"})
+    shots = {x["id"]: x for x in included if x["type"] == "appScreenshots"}
+    for st in sets:
+        ids = [d["id"] for d in (st.get("relationships", {}).get("appScreenshots", {}).get("data") or [])]
+        st["_shots"] = [shots[i] for i in ids if i in shots]
+    return sets
+
+
+@tool()
+def appstore_screenshots(app: str, locale: str = "en-US", version: str = "", platform: str = "IOS") -> str:
+    """Screenshot sets of one locale (device type, how many, processing state).
+
+    Args:
+        app: Apple ID, bundle id or part of the name
+        locale: e.g. en-US
+        version: '' (editable version if any, else live), 'live', 'editable' or a version string
+        platform: IOS, MAC_OS, TV_OS or VISION_OS
+    """
+    a = _app(app)
+    v, loc = _localization(a["id"], platform, locale, version)
+    out = [f"{a['attributes']['name']} {v['attributes']['versionString']} ({_state(v)}) {locale}:"]
+    for st in _screenshot_sets(loc["id"]):
+        states = sorted({(x["attributes"].get("assetDeliveryState") or {}).get("state", "?") for x in st["_shots"]})
+        out.append(f"  {st['attributes']['screenshotDisplayType']}: {len(st['_shots'])} ({', '.join(states) or 'empty'})")
+    return "\n".join(out) if len(out) > 1 else out[0] + " no screenshots."
+
+
+def _upload_screenshot(set_id: str, path: Path) -> str:
+    data = path.read_bytes()
+    reserved = _asc("POST", "/v1/appScreenshots", json={"data": {
+        "type": "appScreenshots", "attributes": {"fileName": path.name, "fileSize": len(data)},
+        "relationships": {"appScreenshotSet": {"data": {"type": "appScreenshotSets", "id": set_id}}}}})["data"]
+    for op in reserved["attributes"].get("uploadOperations") or []:
+        part = data[op["offset"]: op["offset"] + op["length"]]
+        headers = {h["name"]: h["value"] for h in op.get("requestHeaders") or []}
+        r = requests.request(op["method"], op["url"], data=part, headers=headers, timeout=300)
+        if r.status_code >= 400:
+            raise ConsoleError(f"{path.name}: upload refused ({r.status_code}) {r.text[:200]}")
+    _asc("PATCH", f"/v1/appScreenshots/{reserved['id']}", json={"data": {
+        "type": "appScreenshots", "id": reserved["id"],
+        "attributes": {"uploaded": True, "sourceFileChecksum": hashlib.md5(data).hexdigest()}}})
+    return reserved["id"]
+
+
+@tool(write=True)
+def appstore_upload_screenshots(app: str, locale: str, display_type: str, files: list[str], replace: bool = False,
+                                platform: str = "IOS", confirm: bool = False) -> str:
+    """Upload screenshots for one device type and locale of the editable version, in the order given.
+
+    Args:
+        app: Apple ID, bundle id or part of the name
+        locale: e.g. en-US
+        display_type: e.g. APP_IPHONE_67 (6.7"/6.9"), APP_IPHONE_65, APP_IPHONE_55, APP_IPAD_PRO_3GEN_129, APP_DESKTOP
+        files: PNG or JPEG files at that device's size (up to 10 per set)
+        replace: delete the set's current screenshots first (otherwise new ones go after them)
+        platform: IOS, MAC_OS, TV_OS or VISION_OS
+        confirm: true to upload
+    """
+    display_type = display_type.upper()
+    if not display_type.startswith(("APP_", "IMESSAGE_")):
+        raise ConsoleError("display_type looks like APP_IPHONE_67, APP_IPAD_PRO_3GEN_129, APP_DESKTOP…")
+    paths = [Path(f).expanduser() for f in files]
+    missing = [str(x) for x in paths if not x.is_file()]
+    if missing:
+        raise ConsoleError(f"Not found: {', '.join(missing)}")
+    wrong = [x.name for x in paths if x.suffix.lower() not in SCREENSHOT_MIME]
+    if wrong:
+        raise ConsoleError(f"Only PNG or JPEG: {', '.join(wrong)}")
+    a = _app(app)
+    v, loc = _localization(a["id"], platform, locale, "editable")
+    current = next((st for st in _screenshot_sets(loc["id"])
+                    if st["attributes"]["screenshotDisplayType"] == display_type), None)
+    keep = 0 if replace or not current else len(current["_shots"])
+    if keep + len(paths) > MAX_SCREENSHOTS:
+        raise ConsoleError(f"A set holds at most {MAX_SCREENSHOTS} screenshots: {keep} stay + {len(paths)} new.")
+    plan = (f"{a['attributes']['name']} {v['attributes']['versionString']} {locale} {display_type}: "
+            f"{len(current['_shots']) if current else 0} → {keep + len(paths)} screenshots "
+            f"({', '.join(x.name for x in paths)})")
+    if not confirm:
+        return f"{DRY_RUN}. Apple checks the image sizes only on upload.\n{plan}"
+    if not current:
+        current = {"id": _asc("POST", "/v1/appScreenshotSets", json={"data": {
+            "type": "appScreenshotSets", "attributes": {"screenshotDisplayType": display_type},
+            "relationships": {"appStoreVersionLocalization": {"data": {
+                "type": "appStoreVersionLocalizations", "id": loc["id"]}}}}})["data"]["id"], "_shots": []}
+    if replace:
+        for shot in current["_shots"]:
+            _asc("DELETE", f"/v1/appScreenshots/{shot['id']}")
+    for x in paths:
+        _upload_screenshot(current["id"], x)
+    return f"Uploaded. {plan}\nApple processes them in a minute or two: check with appstore_screenshots."
+
+
+# ---------------------------------------------------------------- subscriptions and in-app purchases
+
+@tool()
+def appstore_products(app: str, territory: str = "USA") -> str:
+    """Subscription groups and subscriptions (state, period, price in one territory) and in-app purchases.
+
+    Args:
+        app: Apple ID, bundle id or part of the name
+        territory: three-letter territory for prices, e.g. USA, MEX
+    """
+    a = _app(app)
+    groups, included = _all(f"/v1/apps/{a['id']}/subscriptionGroups", {
+        "include": "subscriptions", "fields[subscriptionGroups]": "referenceName,subscriptions",
+        "fields[subscriptions]": "name,productId,state,subscriptionPeriod,groupLevel"})
+    subs = {x["id"]: x for x in included if x["type"] == "subscriptions"}
+    out = []
+    for g in groups:
+        out.append(f"group «{g['attributes'].get('referenceName')}»")
+        for ref in g.get("relationships", {}).get("subscriptions", {}).get("data") or []:
+            sub = subs.get(ref["id"])
+            if not sub:
+                continue
+            at = sub["attributes"]
+            prices, pts = _all(f"/v1/subscriptions/{sub['id']}/prices", {
+                "filter[territory]": territory.upper(), "include": "subscriptionPricePoint",
+                "fields[subscriptionPricePoints]": "customerPrice"}, limit=1)
+            price = next((p["attributes"].get("customerPrice") for p in pts if p["type"] == "subscriptionPricePoints"), None)
+            out.append(f"   · {at.get('productId')} «{at.get('name')}» {at.get('subscriptionPeriod')} {at.get('state')} "
+                       f"level {at.get('groupLevel')} · {territory.upper()} {price or 'no price'}")
+    iaps, _ = _all(f"/v1/apps/{a['id']}/inAppPurchasesV2",
+                   {"fields[inAppPurchases]": "name,productId,inAppPurchaseType,state", "limit": 200})
+    out += [f"iap {x['attributes'].get('productId')} «{x['attributes'].get('name')}» "
+            f"{x['attributes'].get('inAppPurchaseType')} {x['attributes'].get('state')}" for x in iaps]
+    return "\n".join(out) or f"{a['attributes']['name']} has no subscriptions or in-app purchases."
 
 
 # ---------------------------------------------------------------- sales

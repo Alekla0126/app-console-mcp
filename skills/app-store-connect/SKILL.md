@@ -1,6 +1,6 @@
 ---
 name: app-store-connect
-description: Work with App Store Connect from Claude without a browser — app versions and review state, listing texts (name, subtitle, keywords, description, promotional text, what's new), creating a version, attaching a build and submitting to App Review, releasing an approved version, builds/TestFlight state, customer reviews and responses, daily sales and App Store search rank. Use when the user mentions App Store Connect, iOS release, App Review, TestFlight build, keywords field, promotional text, App Store reviews or iOS downloads.
+description: Work with App Store Connect from Claude without a browser — app versions and review state, listing texts (name, subtitle, keywords, description, promotional text, what's new), creating a version, attaching a build and submitting to App Review, releasing an approved version, builds/TestFlight state, screenshots per device and locale, subscriptions and in-app purchases, customer reviews and responses, daily sales and App Store search rank. Use when the user mentions App Store Connect, iOS release, App Review, TestFlight build, keywords field, promotional text, App Store reviews or iOS downloads.
 ---
 
 # App Store Connect
@@ -14,8 +14,9 @@ these tools cover.
 ## Rules
 
 1. Tools that change something (`appstore_update_listing`, `appstore_create_version`, `appstore_submit`,
-   `appstore_release`, `appstore_reply`) are a **dry run** unless `confirm=true`. Run the dry run, show the user
-   the diff or plan, and call with `confirm=true` only after the user approves that exact change.
+   `appstore_release`, `appstore_reply`, `appstore_upload_screenshots`) are a **dry run** unless `confirm=true`.
+   Run the dry run, show the user the diff or plan, and call with `confirm=true` only after the user approves that
+   exact change.
 2. Submitting to review and releasing are visible to Apple and to users: always ask first.
 3. Before writing a promise in the listing or what's new, check the feature exists in the app's code.
 4. Never print or commit the .p8 key.
@@ -35,6 +36,8 @@ these tools cover.
 | Reviews / respond | `appstore_reviews app` (`reviews`), `appstore_reply review_id text` (`reply`) |
 | Downloads and proceeds | `appstore_sales days` (`sales`, needs ASC_VENDOR_NUMBER) |
 | Public search position | `appstore_search_rank app_id keywords...` (`search-rank`) |
+| Screenshots | `appstore_screenshots app locale` (`screenshots`), upload with `appstore_upload_screenshots` |
+| Subscriptions and in-app purchases | `appstore_products app territory` (`products`) |
 
 ## Workflows
 
@@ -55,8 +58,9 @@ then `appstore_update_listing keywords=...`. Promotional text can change any tim
 
 ## What the API cannot do here (needs App Store Connect in the browser)
 
-Creating the app record, App Privacy labels, age rating questionnaire, screenshots and previews (not in this
-version), pricing and in-app purchase setup, and answering App Review messages in the Resolution Center.
+Creating the app record, App Privacy labels, the age rating questionnaire, app previews (video), creating or
+pricing subscriptions and in-app purchases (not in this version), and answering App Review messages in the
+Resolution Center.
 
 ## Setup problems
 

@@ -20,10 +20,12 @@ Codex: ahí cada agente recibe estas herramientas para los servicios que hayas c
 
 - **Google Play**: fichas (título, descripción breve y completa, idiomas nuevos), subir .aab/.apk a cualquier pista,
   promover entre pistas, lanzamientos graduales (cambiar %, completar, detener), reseñas y respuestas, Android vitals
-  (cierres y ANR con las cifras de 28 días de Google), suscripciones y precios, y posición en la búsqueda.
+  (cierres y ANR con las cifras de 28 días de Google), suscripciones y precios, capturas y gráficos, usuarios y
+  permisos (invitar cuentas de servicio por app), el formulario de Data safety (CSV) y posición en la búsqueda.
 - **App Store Connect**: versiones y estado de revisión, textos de la ficha (nombre, subtítulo, keywords,
   descripción, texto promocional, novedades), crear versión, builds, adjuntar build y enviar a App Review, publicar
-  una versión aprobada, reseñas y respuestas, ventas (descargas, compras, ingresos) y posición en la búsqueda.
+  una versión aprobada, capturas por dispositivo e idioma, suscripciones y compras, reseñas y respuestas, ventas
+  (descargas, compras, ingresos) y posición en la búsqueda.
 - **AdMob**: ganancias, eCPM, tasa de coincidencia, de visualización y CTR por app, bloque, país, formato,
   versión de la app o del SDK, motivo de anuncios limitados, fuente de anuncios o grupo de mediación, comparadas con
   el periodo anterior; reporte de campañas (instalaciones, costo, CPI); apps, bloques, fuentes y adaptadores. Con el

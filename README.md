@@ -46,6 +46,9 @@ AdMob 2026-10-20 to 2026-10-26 by format: 128.40 USD (+9% vs previous 7 d: 117.8
 | `vitals` crash and ANR rates (Google's 28-day numbers) | `reviews` / `reply` | `map-ad-unit` / `create-mediation-group` / `update-mediation-group` ✱ |
 | `products` subscriptions, base plans, prices | `sales` downloads, IAP units, proceeds per app | `ab-experiment` start or stop a mediation A/B test ✱ |
 | `search-rank` public search position | `search-rank` public search position | |
+| `images` / `upload-images` screenshots and graphics | `screenshots` / `upload-screenshots` per device and locale | |
+| `users` / `grant` / `revoke` users, service accounts and app permissions | `products` subscriptions and in-app purchases | |
+| `data-safety` send the Data safety form (CSV) | | |
 
 ✱ AdMob's limited access: Google has to enable your publisher id for these methods (ask your AdMob account manager or AdMob support) and the token needs the `admob.monetization` scope (`appconsole admob login --monetization`). Until then they explain what to ask for.
 
@@ -121,6 +124,8 @@ where you keep them. Run `appconsole doctor` to check all three services.
    what you need: *View app information* (read and vitals), *Manage store presence* (listings), *Release apps to
    testing tracks* / *Release to production* (uploads and rollouts), *Reply to reviews*.
 4. `appconsole config set GOOGLE_PLAY_SERVICE_ACCOUNT /path/to/key.json`
+5. For `users`, `grant` and `revoke`: `appconsole config set GOOGLE_PLAY_DEVELOPER_ID <the number after /developers/
+   in any Play Console address>`, and give the key "Manage users and permissions".
 
 ### App Store Connect setup
 
@@ -161,6 +166,7 @@ With several publisher accounts set `ADMOB_PUBLISHER_ID=pub-...`.
 | Setting | Used by |
 |---|---|
 | `GOOGLE_PLAY_SERVICE_ACCOUNT` | Google Play (falls back to `GOOGLE_APPLICATION_CREDENTIALS`) |
+| `GOOGLE_PLAY_DEVELOPER_ID` | Google Play users and permissions |
 | `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_PRIVATE_KEY_PATH` or `ASC_PRIVATE_KEY` | App Store Connect |
 | `ASC_API_KEY_JSON` | App Store Connect, fastlane-format key file instead of the three above |
 | `ASC_VENDOR_NUMBER` | `appstore sales` |
@@ -173,10 +179,11 @@ With several publisher accounts set `ADMOB_PUBLISHER_ID=pub-...`.
 These still need the website, and the tools say so when you hit them:
 
 - **Google Play**: the *Publish* button when managed publishing is on (and *Send for review* when Google demands
-  it by hand), creating apps, data safety / content rating / ads declarations, custom store listings and listing
-  experiments, replying to reviews older than about a week.
-- **App Store Connect**: creating the app record, App Privacy labels, age rating, pricing and in-app purchase
-  setup, Resolution Center messages. Screenshots are possible through the API but not implemented yet.
+  it by hand), creating apps, content rating, ads and advertising ID declarations, target audience, app access,
+  custom store listings and listing experiments, replying to reviews older than about a week, and reading back
+  the Data safety answers.
+- **App Store Connect**: creating the app record, App Privacy labels, age rating, app previews, Resolution Center
+  messages. Creating and pricing subscriptions and in-app purchases has an API but isn't implemented yet.
 - **AdMob**: privacy & messaging (GDPR, US states, IDFA), blocking controls, the policy center, payments, app-ads.txt status and users. Creating apps, ad units, mappings and mediation groups exists but only for publishers Google enabled (✱ above).
 
 ## Development

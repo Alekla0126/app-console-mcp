@@ -1,6 +1,6 @@
 [project]
 name = "app-console-mcp"
-version = "0.2.0"
+version = "0.3.0"
 description = "Google Play Console, App Store Connect and AdMob from the terminal or from Claude (MCP), without opening a browser."
 readme = "README.md"
 license = "MIT"

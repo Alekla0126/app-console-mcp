@@ -316,3 +316,108 @@ def test_admob_campaign_report(admob_offline, monkeypatch):
     assert out.splitlines()[1].startswith("  Big: 1000 impr, 50 clicks (CTR 5.0%), 10 installs, cost 20.00 USD, CPI 2.00")
     with pytest.raises(core.ConsoleError, match="at most 30 days"):
         admob.admob_campaign_report(days=31)
+
+
+# ---------------------------------------------------------------- Play: graphics, users, data safety
+
+def test_play_image_uploads_are_checked_before_any_call(tmp_path, monkeypatch):
+    monkeypatch.setattr(play, "_session", lambda *a: pytest.fail("no network"))
+    png = tmp_path / "a.png"
+    png.write_bytes(b"x")
+    with pytest.raises(core.ConsoleError, match="image_type must be"):
+        play.play_upload_images("com.x", "en-US", "screens", [str(png)])
+    with pytest.raises(core.ConsoleError, match="Only PNG or JPEG"):
+        play.play_upload_images("com.x", "en-US", "phoneScreenshots", [__file__])
+    with pytest.raises(core.ConsoleError, match="exactly one"):
+        play.play_upload_images("com.x", "en-US", "icon", [str(png), str(png)])
+
+
+def test_play_permission_presets_and_names():
+    assert play._permissions("deploy")[:3] == ["CAN_ACCESS_APP", "CAN_VIEW_NON_FINANCIAL_DATA", "CAN_VIEW_APP_QUALITY"]
+    names = play._permissions("read, reply_to_reviews,CAN_MANAGE_ORDERS")
+    assert names[-2:] == ["CAN_REPLY_TO_REVIEWS", "CAN_MANAGE_ORDERS"]
+    with pytest.raises(core.ConsoleError, match="Unknown permission"):
+        play._permissions("admin")
+
+
+def test_play_grant_invites_or_updates(monkeypatch):
+    users = [{"email": "ci@p.iam.gserviceaccount.com",
+              "grants": [{"packageName": "com.x", "appLevelPermissions": ["CAN_ACCESS_APP"]}]}]
+    monkeypatch.setattr(play, "_users", lambda: users)
+    plan = play.play_grant("ci@p.iam.gserviceaccount.com", "com.x", "read")
+    assert "access_app → access_app,view_non_financial_data" in plan
+    assert play.play_grant("new@p.iam.gserviceaccount.com", "com.x").startswith("DRY RUN")
+    sent = []
+    monkeypatch.setattr(play, "_users_call", lambda method, path="", **kw: sent.append((method, path, kw)))
+    play.play_grant("ci@p.iam.gserviceaccount.com", "com.x", "read", confirm=True)
+    play.play_grant("ci@p.iam.gserviceaccount.com", "com.y", "read", confirm=True)
+    play.play_grant("new@p.iam.gserviceaccount.com", "com.x", "read", confirm=True)
+    play.play_revoke("ci@p.iam.gserviceaccount.com", "com.x", confirm=True)
+    assert [(m, p) for m, p, _ in sent] == [("PATCH", "/ci@p.iam.gserviceaccount.com/grants/com.x"),
+                                            ("POST", "/ci@p.iam.gserviceaccount.com/grants"), ("POST", ""),
+                                            ("DELETE", "/ci@p.iam.gserviceaccount.com/grants/com.x")]
+    assert sent[0][2]["params"] == {"updateMask": "appLevelPermissions"}
+    assert sent[2][2]["json"]["grants"][0]["packageName"] == "com.x"
+    with pytest.raises(core.ConsoleError, match="no grant on com.z"):
+        play.play_revoke("ci@p.iam.gserviceaccount.com", "com.z")
+
+
+def test_play_users_403_says_which_permission(monkeypatch):
+    monkeypatch.setenv("GOOGLE_PLAY_DEVELOPER_ID", "123")
+    monkeypatch.setattr(play, "_session", lambda *a: None)
+
+    def denied(*a, **k):
+        raise core.ConsoleError("HTTP 403 on GET /x: You do not have permission to access this object")
+    monkeypatch.setattr(play, "call", denied)
+    with pytest.raises(core.ConsoleError, match="Manage users and permissions"):
+        play.play_users()
+
+
+def test_play_data_safety_csv(tmp_path, monkeypatch):
+    good = tmp_path / "ds.csv"
+    good.write_text("Question ID (machine readable),Response ID (machine readable),Response value,Answer requirement\n"
+                    "PSL_DATA_COLLECTION,,true,REQUIRED\nPSL_ENCRYPTED,,,OPTIONAL\n")
+    out = play.play_data_safety("com.x", str(good))
+    assert out.startswith("DRY RUN") and "2 rows, 1 answered" in out
+    bad = tmp_path / "bad.csv"
+    bad.write_text("a,b\n1,2\n")
+    with pytest.raises(core.ConsoleError, match="Data safety export"):
+        play.play_data_safety("com.x", str(bad))
+    sent = {}
+    monkeypatch.setattr(play, "_api", lambda method, path, **kw: sent.update(method=method, path=path, **kw))
+    play.play_data_safety("com.x", str(good), confirm=True)
+    assert sent["path"] == "com.x/dataSafety" and sent["json"]["safetyLabels"].startswith("Question ID")
+
+
+# ---------------------------------------------------------------- App Store: screenshots
+
+def test_appstore_screenshot_upload(tmp_path, monkeypatch):
+    shots = [tmp_path / f"{i}.png" for i in range(3)]
+    for i, x in enumerate(shots):
+        x.write_bytes(bytes([i]) * 10)
+    monkeypatch.setattr(appstore, "_app", lambda a: {"id": "1", "attributes": {"name": "App"}})
+    monkeypatch.setattr(appstore, "_localization", lambda *a: ({"attributes": {"versionString": "2.0"}}, {"id": "L"}))
+    existing = {"id": "S", "attributes": {"screenshotDisplayType": "APP_IPHONE_67"},
+                "_shots": [{"id": f"old{i}"} for i in range(8)]}
+    monkeypatch.setattr(appstore, "_screenshot_sets", lambda loc: [existing])
+    with pytest.raises(core.ConsoleError, match="at most 10"):
+        appstore.appstore_upload_screenshots("App", "en-US", "app_iphone_67", [str(x) for x in shots])
+    out = appstore.appstore_upload_screenshots("App", "en-US", "APP_IPHONE_67", [str(x) for x in shots], replace=True)
+    assert out.startswith("DRY RUN") and "8 → 3 screenshots" in out
+    calls, puts = [], []
+
+    def asc(method, path, **kw):
+        calls.append((method, path))
+        if method == "POST":
+            return {"data": {"id": "N", "attributes": {"uploadOperations": [
+                {"method": "PUT", "url": "https://u", "offset": 0, "length": 10,
+                 "requestHeaders": [{"name": "Content-Type", "value": "image/png"}]}]}}}
+        return {}
+    monkeypatch.setattr(appstore, "_asc", asc)
+    ok = type("R", (), {"status_code": 200})()
+    monkeypatch.setattr(appstore.requests, "request", lambda m, u, data, headers, timeout: puts.append(data) or ok)
+    appstore.appstore_upload_screenshots("App", "en-US", "APP_IPHONE_67", [str(shots[0])], replace=True, confirm=True)
+    assert calls.count(("DELETE", "/v1/appScreenshots/old0")) == 1 and ("POST", "/v1/appScreenshots") in calls
+    assert ("PATCH", "/v1/appScreenshots/N") in calls and puts == [bytes([0]) * 10]
+    with pytest.raises(core.ConsoleError, match="APP_IPHONE_67"):
+        appstore.appstore_upload_screenshots("App", "en-US", "iphone", [str(shots[0])])

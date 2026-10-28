@@ -5,25 +5,45 @@ Auth: a Google Cloud service account JSON key that was invited in Play Console
 """
 from __future__ import annotations
 
+import csv
+import io
 import os
 from datetime import date, datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import quote
 
 from google.auth.transport.requests import AuthorizedSession
 from google.oauth2 import service_account
 
-from .core import DRY_RUN, ConsoleError, Toolset, call, check_limits, clip, diff_lines, setting
+from .core import DRY_RUN, ConsoleError, Toolset, api_error, call, check_limits, clip, diff_lines, setting
 
 API = "https://androidpublisher.googleapis.com/androidpublisher/v3/applications"
 UPLOAD_API = "https://androidpublisher.googleapis.com/upload/androidpublisher/v3/applications"
 REPORTING = "https://playdeveloperreporting.googleapis.com/v1beta1"
+DEVELOPERS = "https://androidpublisher.googleapis.com/androidpublisher/v3/developers"
 SCOPE_PUBLISHER = "https://www.googleapis.com/auth/androidpublisher"
 SCOPE_REPORTING = "https://www.googleapis.com/auth/playdeveloperreporting"
 LISTING_LIMITS = {"title": 30, "shortDescription": 80, "fullDescription": 4000}
 RELEASE_NOTES_LIMIT = 500
 REPLY_LIMIT = 350
 BAD_BEHAVIOR = {"crash": 1.09, "anr": 0.47}  # Google's overall user-perceived thresholds, in %
+IMAGE_TYPES = ["phoneScreenshots", "sevenInchScreenshots", "tenInchScreenshots", "tvScreenshots", "wearScreenshots",
+               "icon", "featureGraphic", "tvBanner"]
+SINGLE_IMAGES = {"icon", "featureGraphic", "tvBanner"}
+IMAGE_MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
+APP_PERMISSIONS = ["CAN_ACCESS_APP", "CAN_VIEW_FINANCIAL_DATA", "CAN_MANAGE_PERMISSIONS", "CAN_REPLY_TO_REVIEWS",
+                   "CAN_MANAGE_PUBLIC_APKS", "CAN_MANAGE_TRACK_APKS", "CAN_MANAGE_TRACK_USERS", "CAN_MANAGE_PUBLIC_LISTING",
+                   "CAN_MANAGE_DRAFT_APPS", "CAN_MANAGE_ORDERS", "CAN_MANAGE_APP_CONTENT", "CAN_VIEW_NON_FINANCIAL_DATA",
+                   "CAN_VIEW_APP_QUALITY", "CAN_MANAGE_DEEPLINKS"]
+_READ = ["CAN_ACCESS_APP", "CAN_VIEW_NON_FINANCIAL_DATA", "CAN_VIEW_APP_QUALITY"]
+PERMISSION_PRESETS = {
+    "read": _READ,
+    # what a CI/deploy service account needs: releases on every track, the store listing and testers
+    "deploy": _READ + ["CAN_MANAGE_TRACK_APKS", "CAN_MANAGE_PUBLIC_APKS", "CAN_MANAGE_DRAFT_APPS",
+                       "CAN_MANAGE_PUBLIC_LISTING", "CAN_MANAGE_TRACK_USERS"],
+    "full": APP_PERMISSIONS,
+}
 
 toolset = Toolset(
     "play", "google-play", "Google Play Console",
@@ -495,6 +515,212 @@ def play_products(package: str, region: str = "US") -> str:
             out.append(f"one-time {p['sku']} {p.get('status')} "
                        f"{int(price.get('priceMicros', 0)) / 1e6:g} {price.get('currency', '')}")
     return "\n".join(out) or f"{package} has no subscriptions or in-app products."
+
+
+# ---------------------------------------------------------------- store listing graphics
+
+@tool()
+def play_images(package: str, language: str = "en-US") -> str:
+    """How many images each graphic type has in one listing language (screenshots, icon, feature graphic, TV banner).
+
+    Args:
+        package: Android package name
+        language: listing language, e.g. en-US
+    """
+    with _Edit(package) as e:
+        counts = {t: len(e("GET", f"listings/{language}/{t}").get("images", [])) for t in IMAGE_TYPES}
+    return f"{package} {language}: " + ", ".join(f"{t} {n}" for t, n in counts.items())
+
+
+@tool(write=True)
+def play_upload_images(package: str, language: str, image_type: str, files: list[str], replace: bool = False,
+                       confirm: bool = False) -> str:
+    """Upload screenshots or graphics to one listing language, in the order given.
+
+    Without confirm the images go into a draft edit that Google validates and then discards.
+
+    Args:
+        package: Android package name
+        language: listing language, e.g. en-US
+        image_type: phoneScreenshots, sevenInchScreenshots, tenInchScreenshots, tvScreenshots, wearScreenshots,
+            icon, featureGraphic or tvBanner
+        files: PNG or JPEG files (one for icon, featureGraphic and tvBanner; up to 8 screenshots per type)
+        replace: delete the current screenshots of that type first (otherwise new ones go after them)
+        confirm: true to save and send to review
+    """
+    if image_type not in IMAGE_TYPES:
+        raise ConsoleError(f"image_type must be one of {', '.join(IMAGE_TYPES)}.")
+    paths = [Path(f).expanduser() for f in files]
+    missing = [str(x) for x in paths if not x.is_file()]
+    if missing:
+        raise ConsoleError(f"Not found: {', '.join(missing)}")
+    wrong = [x.name for x in paths if x.suffix.lower() not in IMAGE_MIME]
+    if wrong:
+        raise ConsoleError(f"Only PNG or JPEG: {', '.join(wrong)}")
+    if image_type in SINGLE_IMAGES and len(paths) != 1:
+        raise ConsoleError(f"{image_type} takes exactly one image.")
+    with _Edit(package) as e:
+        listing = f"listings/{language}/{image_type}"
+        before = len(e("GET", listing).get("images", []))
+        if replace and before and image_type not in SINGLE_IMAGES:
+            e("DELETE", listing)
+        for x in paths:
+            r = _session().post(f"{UPLOAD_API}/{package}/edits/{e.id}/{listing}", params={"uploadType": "media"},
+                                data=x.read_bytes(), headers={"Content-Type": IMAGE_MIME[x.suffix.lower()]}, timeout=300)
+            if r.status_code >= 400:
+                raise ConsoleError(f"{x.name} was refused ({r.status_code}): {api_error(r)}")
+        after = len(e("GET", listing).get("images", []))
+        e.validate()
+        plan = f"{package} {language} {image_type}: {before} → {after} images ({', '.join(x.name for x in paths)})"
+        if not confirm:
+            return f"{DRY_RUN}. Google accepted the images.\n{plan}"
+        return f"{e.commit()}\n{plan}"
+
+
+# ---------------------------------------------------------------- users and permissions
+
+USERS_HINT = ("The service account can't manage users: in Play Console > Users and permissions give it "
+              "\"Manage users and permissions\" (once, for the account or for the apps it should manage).")
+
+
+def _users_call(method: str, path: str = "", **kw):
+    dev = setting("GOOGLE_PLAY_DEVELOPER_ID", "It is the number after /developers/ in any Play Console address.")
+    try:
+        return call(_session(), method, f"{DEVELOPERS}/{dev}/users{path}", **kw)
+    except ConsoleError as err:
+        if "HTTP 403" in str(err):
+            raise ConsoleError(f"{err}\n{USERS_HINT}") from err
+        raise
+
+
+def _users() -> list[dict]:
+    return _users_call("GET", params={"pageSize": -1}).get("users", [])  # the API doesn't paginate users
+
+
+def _short(perms: list[str]) -> str:
+    return ",".join(x.removeprefix("CAN_").removesuffix("_GLOBAL").lower() for x in perms) or "-"
+
+
+def _permissions(spec: str) -> list[str]:
+    """'deploy' or 'read,reply_to_reviews' or 'CAN_MANAGE_ORDERS' → the API's app-level permission names."""
+    out: list[str] = []
+    for item in (x.strip() for x in spec.split(",") if x.strip()):
+        upper = item.upper()
+        names = PERMISSION_PRESETS.get(item.lower()) or [upper if upper.startswith("CAN_") else "CAN_" + upper]
+        bad = [n for n in names if n not in APP_PERMISSIONS]
+        if bad:
+            raise ConsoleError(f"Unknown permission {item!r}. Presets: {', '.join(PERMISSION_PRESETS)}; or any of "
+                               f"{_short(APP_PERMISSIONS)}")
+        out += [n for n in names if n not in out]
+    if not out:
+        raise ConsoleError("Give permissions: a preset (read, deploy, full) or names, comma-separated.")
+    return out
+
+
+@tool()
+def play_users(package: str = "") -> str:
+    """Users and service accounts of the Play developer account, with account-wide permissions and per-app grants.
+
+    Needs GOOGLE_PLAY_DEVELOPER_ID and a key with "Manage users and permissions".
+
+    Args:
+        package: only people with access to this app
+    """
+    out = []
+    for u in _users():
+        grants = {g["packageName"]: g.get("appLevelPermissions", []) for g in u.get("grants", [])}
+        account = u.get("developerAccountPermissions", [])
+        if package and package not in grants and not account:
+            continue
+        apps = (f"{package}: {_short(grants[package])}" if package in grants else
+                f"{len(grants)} apps" if not package else "no app grant")
+        out.append(f"{u['email']} [{u.get('accessState', '?').lower()}] account: {_short(account)} · {apps}")
+    return "\n".join(out) or "No users match."
+
+
+@tool(write=True)
+def play_grant(email: str, package: str, permissions: str = "deploy", confirm: bool = False) -> str:
+    """Give a person or service account permissions on one app, inviting them to the account first if needed.
+
+    Args:
+        email: their Google account or service account email
+        package: Android package name
+        permissions: preset read, deploy (releases on every track, listing, testers) or full, or permission names
+            comma-separated (e.g. reply_to_reviews,view_financial_data)
+        confirm: true to save
+    """
+    perms = _permissions(permissions)
+    user = next((u for u in _users() if u["email"].lower() == email.lower()), None)
+    who = quote(email, safe="@")
+    if not user:
+        body = {"email": email, "grants": [{"packageName": package, "appLevelPermissions": perms}]}
+        plan = f"Invite {email} with {package}: {_short(perms)}"
+        if not confirm:
+            return f"{DRY_RUN}.\n{plan}"
+        _users_call("POST", json=body)
+        return f"Invited. {plan} (a person has to accept the email invitation; a service account works right away)."
+    current = next((g for g in user.get("grants", []) if g["packageName"] == package), None)
+    plan = f"{email} on {package}: {_short(current['appLevelPermissions']) if current else 'none'} → {_short(perms)}"
+    if not confirm:
+        return f"{DRY_RUN}.\n{plan}"
+    if current:
+        _users_call("PATCH", f"/{who}/grants/{package}", params={"updateMask": "appLevelPermissions"},
+                    json={"appLevelPermissions": perms})
+    else:
+        _users_call("POST", f"/{who}/grants", json={"packageName": package, "appLevelPermissions": perms})
+    return f"Saved. {plan}"
+
+
+@tool(write=True)
+def play_revoke(email: str, package: str = "", confirm: bool = False) -> str:
+    """Remove someone's access to one app, or (without package) remove them from the developer account.
+
+    Args:
+        email: their email
+        package: the app to remove them from; empty removes them from the whole account
+        confirm: true to remove
+    """
+    user = next((u for u in _users() if u["email"].lower() == email.lower()), None)
+    if not user:
+        raise ConsoleError(f"{email} isn't in the developer account.")
+    who = quote(email, safe="@")
+    if package and not any(g["packageName"] == package for g in user.get("grants", [])):
+        raise ConsoleError(f"{email} has no grant on {package}.")
+    plan = f"Remove {email} from {package}" if package else f"Remove {email} from the developer account (every app)"
+    if not confirm:
+        return f"{DRY_RUN}.\n{plan}"
+    _users_call("DELETE", f"/{who}/grants/{package}" if package else f"/{who}")
+    return f"Done. {plan}"
+
+
+# ---------------------------------------------------------------- data safety
+
+@tool(write=True)
+def play_data_safety(package: str, csv_file: str, confirm: bool = False) -> str:
+    """Replace an app's Data safety answers with a CSV in Play Console's format.
+
+    Get the CSV once from Play Console (App content > Data safety > Export to CSV), edit it, and reuse it for similar
+    apps. Google offers no way to read the current answers back through the API.
+
+    Args:
+        package: Android package name
+        csv_file: path to the CSV
+        confirm: true to send it
+    """
+    path = Path(csv_file).expanduser()
+    if not path.is_file():
+        raise ConsoleError(f"File not found: {path}")
+    text = path.read_text(encoding="utf-8-sig")
+    rows = list(csv.reader(io.StringIO(text)))
+    if len(rows) < 2 or not any("Question ID" in cell for cell in rows[0]):
+        raise ConsoleError("This doesn't look like Play Console's Data safety export (the first row should have "
+                           "'Question ID (machine readable)').")
+    answered = sum(1 for r in rows[1:] if len(r) > 2 and r[2].strip())
+    plan = f"{package}: Data safety from {path.name} ({len(rows) - 1} rows, {answered} answered)"
+    if not confirm:
+        return f"{DRY_RUN}. Google checks the answers only when they are sent.\n{plan}"
+    _api("POST", f"{package}/dataSafety", json={"safetyLabels": text})
+    return f"Saved. {plan}"
 
 
 # ---------------------------------------------------------------- public search
