@@ -1,0 +1,82 @@
+name: docker
+
+# The all-in-one server as an image on ghcr.io, then the official MCP Registry with that image, so the
+# registry lists the server before it is on PyPI. The image's label proves it belongs to this server.
+# While PUBLISH_PYPI is on, publish.yml publishes to the registry instead (each version is taken once).
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.v.outputs.image }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: v
+        run: echo "image=ghcr.io/alekla0126/app-console-mcp:$(jq -r .version server.json)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ steps.v.outputs.image }}
+            ghcr.io/alekla0126/app-console-mcp:latest
+      # stdin stays open a few seconds: at end of input the server exits before answering tools/list.
+      - name: The server starts and lists its tools
+        run: |
+          set -euo pipefail
+          { printf '%s\n' \
+              '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"0"}}}' \
+              '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+              '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+            sleep 10; } | docker run --rm -i "${{ steps.v.outputs.image }}" > out.jsonl
+          grep -q '"id":2,"result":{"tools":\[' out.jsonl
+
+  mcp-registry:
+    needs: image
+    if: vars.PUBLISH_PYPI != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      MCP_PUBLISHER_VERSION: v1.8.1
+    steps:
+      - uses: actions/checkout@v5
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Download and verify mcp-publisher
+        run: |
+          set -euo pipefail
+          archive="mcp-publisher_linux_amd64.tar.gz"
+          base_url="https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}"
+          curl --fail --location --silent --show-error --output "$archive" "$base_url/$archive"
+          curl --fail --location --silent --show-error --output "$archive.sigstore.json" "$base_url/$archive.sigstore.json"
+          cosign verify-blob \
+            --bundle "$archive.sigstore.json" \
+            --certificate-identity "https://github.com/modelcontextprotocol/registry/.github/workflows/release.yml@refs/tags/${MCP_PUBLISHER_VERSION}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "$archive"
+          tar xzf "$archive" mcp-publisher
+      - name: List the image instead of the PyPI package
+        run: |
+          jq --arg img "${{ needs.image.outputs.image }}" \
+            '.packages = [.packages[0] | {registryType: "oci", identifier: $img, transport, environmentVariables}]' \
+            server.json > server.oci.json
+          mv server.oci.json server.json
+          cat server.json
+      - run: ./mcp-publisher login github-oidc
+      - run: ./mcp-publisher publish

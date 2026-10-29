@@ -203,6 +203,11 @@ Tagging `v*` runs `.github/workflows/publish.yml`, which publishes to PyPI and t
 `app-console-mcp`, owner `Alekla0126`, repository `app-console-mcp`, workflow `publish.yml`, environment `pypi`), then
 `gh variable set PUBLISH_PYPI --body true` and re-run the workflow.
 
+Until then, `.github/workflows/docker.yml` (on the same tags, or run by hand) pushes the all-in-one image to
+`ghcr.io/alekla0126/app-console-mcp` and lists that image in the MCP Registry instead. The registry reads the image,
+so the package must be public (GitHub → Packages → app-console-mcp → Package settings → Change visibility). Once
+PyPI is on, add the image to `server.json`'s packages next to PyPI's, because the registry takes each version once.
+
 A tool is one function decorated with `@tool()` (or `@tool(write=True)` with a `confirm` argument) in
 `src/app_console_mcp/{play,appstore,admob}.py`. Its signature and Google-style docstring become both the MCP
 schema and the CLI options. Keep outputs short: they are read by a model.
